@@ -1,0 +1,27 @@
+# --- Gizli / ortam ---
+.env
+.env.*
+!.env.example
+
+# --- Python sanal ortam ---
+venv/
+.venv/
+env/
+
+# --- Python cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# --- Loglar / çalışma çıktıları ---
+*.log
+last_message.txt
+last_backtest.txt
+
+# --- Editör / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

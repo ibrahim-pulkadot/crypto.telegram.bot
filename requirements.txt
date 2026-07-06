@@ -1,0 +1,6 @@
+# Not: Bu makinede WDAC politikası imzasız yerel DLL'leri (numpy.random/pandas/Pillow)
+# engellediği için indikatörler saf Python ile yazıldı; pandas/ta KULLANILMIYOR.
+python-telegram-bot==21.9
+ccxt==4.4.50
+requests==2.32.3
+python-dotenv==1.0.1
