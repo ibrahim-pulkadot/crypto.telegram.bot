@@ -20,6 +20,7 @@ import indicators
 import analyzer
 import formatter
 import backtest
+import intent
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -42,21 +43,66 @@ def _rate_limited(user_id: int) -> bool:
     return False
 
 
+def _authorized(user_id: int) -> bool:
+    """ALLOWED_USER_IDS boşsa herkese açık; doluysa yalnızca listedekiler."""
+    return not config.ALLOWED_USER_IDS or user_id in config.ALLOWED_USER_IDS
+
+
+async def _guard(update: Update) -> bool:
+    """Kullanıcı yetkisizse bilgilendirir ve True döndürür (işlem durdurulmalı)."""
+    uid = update.effective_user.id
+    if not _authorized(uid):
+        log.info("Yetkisiz erişim reddedildi: user_id=%s", uid)
+        await update.message.reply_text(
+            "⛔ Bu bot özeldir; kullanım izniniz yok.\n"
+            f"(Senin Telegram id'in: `{uid}`)",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return True
+    return False
+
+
+def _looks_like_bare_symbol(text: str) -> bool:
+    """Tek kelimelik, sembol gibi görünen girdi mi? (ör. BTC, BTCUSDT, BTC/USDT)"""
+    parts = (text or "").strip().split()
+    if len(parts) != 1:
+        return False
+    core = parts[0].replace("/", "").replace("-", "")
+    return bool(core) and core.isalnum() and len(core) <= 12
+
+
+async def _safe_edit(status, text: str):
+    """Önce Markdown ile dener; biçim hatası olursa düz metne düşer."""
+    try:
+        await status.edit_text(text, parse_mode=ParseMode.MARKDOWN)
+    except Exception:
+        try:
+            await status.edit_text(text)
+        except Exception:
+            log.exception("Mesaj güncellenemedi")
+
+
 WELCOME = (
-    "👋 *Kripto Analiz Botu*\n\n"
-    "Bir coin gönder, teknik analiz + AI yorumu çıkarayım.\n\n"
+    "👋 *{name}*\n\n"
+    "Bir coin gönder ya da benimle *sohbet edercesine* konuş — isteğini anlayıp "
+    "gerçek veriyle analiz ederim.\n\n"
     "*Kullanım:*\n"
-    "• `BTC` veya `BTC/USDT` yaz\n"
-    "• `/analiz ETH 4h`\n"
-    "• Bir grafik görseli gönder (caption'a coin adını yaz), hem görseli hem "
-    "gerçek veriyi birlikte analiz edeyim\n"
+    "• `BTC` veya `BTC/USDT` → hızlı teknik analiz kartı\n"
+    "• _\"BTC'nin 3 aylık verisine bak ve tahmin yap\"_ gibi serbest cümle yaz\n"
+    "• _\"ETH günlük trend nasıl, kısa vade ne bekliyorsun?\"_\n"
+    "• `/analiz ETH` — klasik kart\n"
+    "• Bir grafik görseli gönder (caption'a coin adını/isteğini yaz)\n"
     "• `/dogruluk BTC 4h` — AI tahminlerinin geçmişteki isabet oranını ölç\n\n"
     "⚠️ _Yatırım tavsiyesi değildir._"
 )
 
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(WELCOME, parse_mode=ParseMode.MARKDOWN)
+    if await _guard(update):
+        return
+    await update.message.reply_text(
+        WELCOME.format(name=config.BOT_NAME), parse_mode=ParseMode.MARKDOWN
+    )
 
 
 async def _handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE, symbol_raw: str,
@@ -79,7 +125,7 @@ async def _handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE, symbol_raw: st
 
     try:
         msg, _ = await _run_analysis_threadsafe(symbol_raw, image_bytes)
-        await status.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
+        await _safe_edit(status, msg)
     except Exception as e:
         log.exception("Analiz hatası")
         await status.edit_text(f"⚠️ Analiz başarısız: {e}")
@@ -108,7 +154,57 @@ async def _run_analysis_threadsafe(symbol_raw: str, image_bytes: bytes | None):
     return msg, config.PRIMARY_TIMEFRAME
 
 
+async def _route(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text: str,
+                 image_bytes: bytes | None):
+    """Tek kelimelik sembol → klasik kart; cümle → sohbet modu."""
+    if _looks_like_bare_symbol(text):
+        await _handle(update, ctx, text, image_bytes)
+    else:
+        await _handle_chat(update, ctx, text, image_bytes)
+
+
+async def _handle_chat(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text: str,
+                       image_bytes: bytes | None):
+    """Serbest metin (sohbet) isteğini işler."""
+    user_id = update.effective_user.id
+    if _rate_limited(user_id):
+        await update.message.reply_text(
+            f"⏳ Çok fazla istek. Dakikada {config.RATE_LIMIT_PER_MIN} sorgu sınırı var."
+        )
+        return
+
+    await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    status = await update.message.reply_text(
+        "💬 İsteğini anlıyorum, verileri çekip yorumluyorum..."
+    )
+    try:
+        reply = await asyncio.to_thread(_run_chat, text, image_bytes)
+        await _safe_edit(status, reply)
+    except Exception as e:
+        log.exception("Sohbet analizi hatası")
+        await status.edit_text(f"⚠️ İsteğini işleyemedim: {e}")
+
+
+def _run_chat(text: str, image_bytes: bytes | None) -> str:
+    """Niyeti çözer, uygun veriyi çeker ve isteğe özel serbest yanıt üretir."""
+    parsed = intent.parse(text)
+    if not parsed.get("symbol"):
+        return (
+            "Hangi coin hakkında konuşmak istersin? Örn:\n"
+            "_\"BTC'nin 3 aylık verisine bakıp tahmin yap\"_ ya da "
+            "_\"ETH günlük trend nasıl?\"_"
+        )
+    symbol = data.normalize_symbol(parsed["symbol"])
+    ohlcv = data.fetch_ohlcv(symbol, parsed["timeframe"], parsed["candle_limit"])
+    summary = indicators.multi_timeframe_summary(symbol, {parsed["timeframe"]: ohlcv})
+    if not summary["timeframes"]:
+        raise ValueError(f"'{symbol}' için yeterli veri bulunamadı. Sembolü kontrol et.")
+    return analyzer.chat_analyze(parsed["request"], summary, image_bytes=image_bytes)
+
+
 async def cmd_analiz(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if await _guard(update):
+        return
     args = ctx.args or []
     symbol_raw = args[0] if args else ""
     # İkinci argüman zaman aralığı ise geçici override
@@ -116,6 +212,8 @@ async def cmd_analiz(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_dogruluk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if await _guard(update):
+        return
     args = ctx.args or []
     if not args:
         await update.message.reply_text(
@@ -154,11 +252,15 @@ async def cmd_dogruluk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if await _guard(update):
+        return
     text = (update.message.text or "").strip()
-    await _handle(update, ctx, text, None)
+    await _route(update, ctx, text, None)
 
 
 async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if await _guard(update):
+        return
     caption = (update.message.caption or "").strip()
     photo = update.message.photo[-1]  # en yüksek çözünürlük
     file = await photo.get_file()
@@ -166,12 +268,12 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     image_bytes = bytes(buf)
     if not caption:
         await update.message.reply_text(
-            "🖼️ Görsel alındı ama hangi coin? Caption'a coin adını yaz "
-            "(örn. görselle birlikte `BTC/USDT`).",
+            "🖼️ Görsel alındı ama hangi coin? Caption'a coin adını (veya isteğini) yaz "
+            "(örn. `BTC/USDT` ya da _\"BTC bu grafikte ne diyor?\"_).",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
-    await _handle(update, ctx, caption, image_bytes)
+    await _route(update, ctx, caption, image_bytes)
 
 
 def main():
@@ -191,6 +293,12 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     log.info("Bot başlıyor (model=%s, borsa=%s)...", config.LLM_MODEL, config.EXCHANGE_ID)
+    if config.ALLOWED_USER_IDS:
+        log.info("Özel mod açık: yalnızca %s erişebilir.", config.ALLOWED_USER_IDS)
+    else:
+        log.info("Bot herkese açık (ALLOWED_USER_IDS boş).")
+    if config.BOT_PERSONA:
+        log.info("Kişilik ayarlı: %s", config.BOT_NAME)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

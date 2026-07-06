@@ -22,6 +22,19 @@ TIMEFRAMES = [t.strip() for t in _get("TIMEFRAMES", "1h,4h,1d").split(",") if t.
 CANDLE_LIMIT = int(_get("CANDLE_LIMIT", "200"))
 RATE_LIMIT_PER_MIN = int(_get("RATE_LIMIT_PER_MIN", "5"))
 
+
+def _int_list(raw: str) -> list[int]:
+    return [int(x) for x in raw.replace(" ", "").split(",") if x.lstrip("-").isdigit()]
+
+
+# Bot kimliği / kişiliği (opsiyonel) — LLM'in cevap tonunu belirler.
+BOT_NAME = _get("BOT_NAME", "Kripto Analiz Botu")
+BOT_PERSONA = _get("BOT_PERSONA")
+
+# Erişim kontrolü (opsiyonel) — doluysa YALNIZCA bu Telegram user id'leri botu kullanabilir.
+# Boşsa bot herkese açıktır.
+ALLOWED_USER_IDS = _int_list(_get("ALLOWED_USER_IDS"))
+
 # Analiz motorunun bakacağı ana zaman aralığı (indikatör seviyeleri için)
 PRIMARY_TIMEFRAME = TIMEFRAMES[1] if len(TIMEFRAMES) > 1 else TIMEFRAMES[0]
 

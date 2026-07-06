@@ -1,4 +1,4 @@
-"""OpenAI uyumlu bir LLM API'si üzerinden görsel + indikatör analizi yapar."""
+"""OpenAI uyumlu bir LLM API'si üzerinden analiz ve sohbet yapar."""
 import base64
 import json
 import time
@@ -18,9 +18,23 @@ SYSTEM_PROMPT = (
     "Kurallar:\n"
     "- Sadece verilen verilere dayan, veri uydurma.\n"
     "- Görsel varsa formasyon, trend çizgileri ve mum yapısını da yorumla.\n"
+    "- Kullanıcının özel bir isteği varsa onu da dikkate al.\n"
     "- 'confidence' değerini indikatörlerin ne kadar hemfikir olduğuna göre belirt.\n"
     "- Bu bir yatırım tavsiyesi DEĞİLDİR; çıktı olasılıksaldır.\n"
     "- Yanıtı YALNIZCA aşağıdaki JSON şemasında ver, ekstra metin yazma."
+)
+
+CHAT_SYSTEM_PROMPT = (
+    "Sen deneyimli, samimi bir kripto teknik analiz asistanısın. Kullanıcı sana "
+    "serbest bir dille yazar (ör. '3 aylık veriye bak ve tahmin yap', 'günlük trend "
+    "nasıl?'). Sana ilgili kripto paranın GERÇEK indikatör verileri verilir.\n"
+    "Kurallar:\n"
+    "- Kullanıcının tam olarak istediği şeyi yap; gereksiz genel geçer laf etme.\n"
+    "- Sadece verilen gerçek verilere dayan, fiyat/veri UYDURMA.\n"
+    "- Anlaşılır Türkçe yaz; uygun yerlerde madde imleri, net seviyeler ve olasılık ver.\n"
+    "- Tahmin istenirse yön, olası senaryolar, önemli destek/direnç ve geçersizlik koşulu ver.\n"
+    "- Cevabın en sonuna tek satır '⚠️ Yatırım tavsiyesi değildir.' notu ekle.\n"
+    "- Telegram için sade Markdown kullan (kalın için tek *yıldız*); biçimi abartma."
 )
 
 JSON_SCHEMA_HINT = {
@@ -37,34 +51,28 @@ JSON_SCHEMA_HINT = {
 }
 
 
-def _build_user_content(indicator_summary: dict, image_bytes: bytes | None) -> list:
-    text = (
-        f"Sembol: {indicator_summary.get('symbol')}\n\n"
-        f"Teknik indikatör özeti (zaman aralığı bazında):\n"
-        f"{json.dumps(indicator_summary.get('timeframes', {}), ensure_ascii=False, indent=2)}\n\n"
-        f"Lütfen analizini YALNIZCA şu JSON şemasıyla döndür:\n"
-        f"{json.dumps(JSON_SCHEMA_HINT, ensure_ascii=False, indent=2)}"
-    )
-    content = [{"type": "text", "text": text}]
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-        )
-    return content
+def _system(base: str) -> str:
+    """Sistem promptuna .env'deki bot kişiliğini (varsa) ekler."""
+    if config.BOT_PERSONA:
+        return f"{base}\n\nKİMLİK/TON: Adın '{config.BOT_NAME}'. {config.BOT_PERSONA}"
+    return base
 
 
-def _call_model(model: str, content: list) -> dict:
+def _image_part(image_bytes: bytes) -> dict:
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    return {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+
+
+def _call(model: str, messages: list, response_format, temperature: float,
+          max_tokens: int) -> str:
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": content},
-        ],
-        "temperature": 0.4,
-        "max_tokens": 1200,
-        "response_format": {"type": "json_object"},
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
+    if response_format:
+        payload["response_format"] = response_format
     headers = {
         "Authorization": f"Bearer {config.LLM_API_KEY}",
         "Content-Type": "application/json",
@@ -76,31 +84,79 @@ def _call_model(model: str, content: list) -> dict:
         timeout=90,
     )
     resp.raise_for_status()
-    data = resp.json()
-    return _parse_json(data["choices"][0]["message"]["content"])
+    return resp.json()["choices"][0]["message"]["content"]
 
 
-def analyze(indicator_summary: dict, image_bytes: bytes | None = None) -> dict:
-    """Model analizi yapar; geçici hatalarda retry ve yedek modele geçer."""
-    content = _build_user_content(indicator_summary, image_bytes)
+def _complete(messages: list, response_format=None, temperature: float = 0.4,
+              max_tokens: int = 1200) -> str:
+    """Modeli çağırır; geçici hatalarda retry, kalıcı hatada yedek modele geçer."""
     models = [config.LLM_MODEL] + [m for m in FALLBACK_MODELS if m != config.LLM_MODEL]
-
     last_err = None
     for model in models:
         for attempt in range(MAX_RETRIES):
             try:
-                return _call_model(model, content)
+                return _call(model, messages, response_format, temperature, max_tokens)
             except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as e:
                 last_err = e
                 status = getattr(getattr(e, "response", None), "status_code", None)
-                # 401/400 kalıcı hatadır; retry etme, sıradaki modele de geçme
+                # 401/403 kalıcı hatadır; retry etme, sıradaki modele de geçme
                 if status in (401, 403):
                     raise
                 time.sleep(1.5 * (attempt + 1))
-            except (json.JSONDecodeError, KeyError) as e:
+            except (KeyError, ValueError) as e:  # beklenmedik yanıt gövdesi
                 last_err = e
                 time.sleep(1.0)
-    raise RuntimeError(f"Analiz tüm modellerde başarısız oldu: {last_err}")
+    raise RuntimeError(f"LLM isteği tüm modellerde başarısız oldu: {last_err}")
+
+
+def _build_user_content(indicator_summary: dict, image_bytes: bytes | None,
+                        user_request: str | None = None) -> list:
+    text = (
+        f"Sembol: {indicator_summary.get('symbol')}\n\n"
+        f"Teknik indikatör özeti (zaman aralığı bazında):\n"
+        f"{json.dumps(indicator_summary.get('timeframes', {}), ensure_ascii=False, indent=2)}\n\n"
+    )
+    if user_request:
+        text += f"Kullanıcının özel isteği: {user_request}\n\n"
+    text += (
+        f"Lütfen analizini YALNIZCA şu JSON şemasıyla döndür:\n"
+        f"{json.dumps(JSON_SCHEMA_HINT, ensure_ascii=False, indent=2)}"
+    )
+    content = [{"type": "text", "text": text}]
+    if image_bytes:
+        content.append(_image_part(image_bytes))
+    return content
+
+
+def analyze(indicator_summary: dict, image_bytes: bytes | None = None,
+            user_request: str | None = None) -> dict:
+    """Şemalı (JSON) teknik analiz döndürür."""
+    messages = [
+        {"role": "system", "content": _system(SYSTEM_PROMPT)},
+        {"role": "user", "content": _build_user_content(indicator_summary, image_bytes, user_request)},
+    ]
+    raw = _complete(messages, response_format={"type": "json_object"})
+    return _parse_json(raw)
+
+
+def chat_analyze(user_request: str, indicator_summary: dict,
+                 image_bytes: bytes | None = None) -> str:
+    """Kullanıcının serbest metin isteğine gerçek veriye dayalı serbest yanıt üretir."""
+    text = (
+        f"Kullanıcının isteği: {user_request}\n\n"
+        f"Sembol: {indicator_summary.get('symbol')}\n"
+        f"Gerçek teknik indikatör verileri (zaman aralığı bazında):\n"
+        f"{json.dumps(indicator_summary.get('timeframes', {}), ensure_ascii=False, indent=2)}\n\n"
+        "Bu gerçek verilere dayanarak kullanıcının isteğini eksiksiz yerine getir."
+    )
+    content = [{"type": "text", "text": text}]
+    if image_bytes:
+        content.append(_image_part(image_bytes))
+    messages = [
+        {"role": "system", "content": _system(CHAT_SYSTEM_PROMPT)},
+        {"role": "user", "content": content},
+    ]
+    return _complete(messages, temperature=0.5, max_tokens=1500).strip()
 
 
 def _parse_json(content: str) -> dict:
