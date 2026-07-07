@@ -20,6 +20,9 @@ __pycache__/
 last_message.txt
 last_backtest.txt
 
+# --- Yerel / paylaşılmayan dokümanlar ---
+instagram-gonderi-plani.md
+
 # --- Editör / OS ---
 .vscode/
 .idea/

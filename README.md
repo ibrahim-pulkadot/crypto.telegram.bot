@@ -1,4 +1,6 @@
-# crypto.telegram.bot — Telegram Kripto Analiz Botu
+# Kripto Telegram Botu — Telegram Kripto Analiz Botu
+
+# ⚠️ ʏᴀᴛɪʀɪᴍ ᴛᴀᴠsɪ̇ʏᴇsɪ̇ ᴅᴇɢ̆ɪ̇ʟᴅɪ̇ʀ ⚠️
 
 Bir coin gönder; borsadan **gerçek OHLCV verisi** çeker, teknik indikatörleri saf Python ile hesaplar ve **OpenAI uyumlu bir LLM** (vision destekli) ile olasılıksal bir teknik senaryo çıkarır. İstersen bir **grafik görseli** de gönder — modeli hem görseli hem gerçek veriyi birlikte yorumlar.
 
@@ -117,7 +119,7 @@ Uçtan uca zinciri (veri → indikatör → AI → mesaj) Telegram olmadan çal�
 ## Dosya yapısı
 
 ```
-crypto.telegram.bot/
+Kripto Telegram Botu/
 ├─ bot.py            # Telegram giriş noktası: komutlar, sohbet yönlendirme, erişim kontrolü, rate-limit
 ├─ intent.py         # serbest metin isteğini {sembol, zaman aralığı, süre, istek} yapar (LLM)
 ├─ data.py           # ccxt OHLCV çekme + sembol normalleştirme

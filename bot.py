@@ -92,9 +92,19 @@ WELCOME = (
     "• _\"ETH günlük trend nasıl, kısa vade ne bekliyorsun?\"_\n"
     "• `/analiz ETH` — klasik kart\n"
     "• Bir grafik görseli gönder (caption'a coin adını/isteğini yaz)\n"
-    "• `/dogruluk BTC 4h` — AI tahminlerinin geçmişteki isabet oranını ölç\n\n"
+    "• `/dogruluk BTC 4h` — AI tahminlerinin geçmişteki isabet oranını ölç\n"
+    "• `yardım` yaz veya `/yardim` — bu listeyi tekrar gör\n\n"
     "⚠️ _Yatırım tavsiyesi değildir._"
 )
+
+_HELP_WORDS = {
+    "yardım", "yardim", "help", "menü", "menu", "komutlar",
+    "/yardım", "/yardim", "/help", "/menu", "?",
+}
+
+
+def _is_help_text(text: str) -> bool:
+    return (text or "").strip().lower() in _HELP_WORDS
 
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -255,6 +265,11 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if await _guard(update):
         return
     text = (update.message.text or "").strip()
+    if _is_help_text(text):
+        await update.message.reply_text(
+            WELCOME.format(name=config.BOT_NAME), parse_mode=ParseMode.MARKDOWN
+        )
+        return
     await _route(update, ctx, text, None)
 
 
@@ -289,6 +304,7 @@ def main():
     app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CommandHandler("analiz", cmd_analiz))
     app.add_handler(CommandHandler("dogruluk", cmd_dogruluk))
+    app.add_handler(CommandHandler("yardim", cmd_start))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
