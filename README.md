@@ -66,7 +66,7 @@ RATE_LIMIT_PER_MIN=5                        # kullanıcı başına dakikalık is
 | `LLM_MODEL` | `gpt-4o-mini` | Ana model (vision destekli olmalı) |
 | `LLM_FALLBACK_MODELS` | — | Ana model başarısız olursa denenecek yedek modeller (virgülle) |
 | `BOT_NAME` | `Kripto Analiz Botu` | Botun adı (kişiliğe eklenir) |
-| `BOT_PERSONA` | — | Botun cevap tonu/kişiliği (serbest metin, opsiyonel) |
+| `BOT_PERSONA` | — | Botun cevap tonu/kişiliği (serbest metin, opsiyonel). `persona.txt` doluysa onu ezer — bkz. [Kişilik (persona)](#-kişilik-persona) |
 | `ALLOWED_USER_IDS` | — | **Boşsa herkese açık.** Doluysa yalnızca bu Telegram id'leri kullanabilir (virgülle). Kendi id'ni [@userinfobot](https://t.me/userinfobot)'tan öğren |
 | `EXCHANGE_ID` | `binance` | ccxt borsa id |
 | `TIMEFRAMES` | `1h,4h,1d` | Analiz zaman aralıkları (virgülle) |
@@ -74,6 +74,28 @@ RATE_LIMIT_PER_MIN=5                        # kullanıcı başına dakikalık is
 | `RATE_LIMIT_PER_MIN` | `5` | Kullanıcı başına dakikalık limit |
 
 Model başlangıçta `config.validate()` ile doğrulanır; token veya API anahtarı eksikse bot açılmaz.
+
+### 🎭 Kişilik (persona)
+
+Botun cevap tonu, kök dizindeki **`persona.txt`** dosyasından okunur (doluysa `.env`'deki `BOT_PERSONA`'yı ezer). `persona/` klasöründe hazır kişilikler bulunur:
+
+| Dosya | Ton |
+|-------|-----|
+| `persona/kisa-net.txt` | Kısa, net, sadece bilgi + tek cümlelik kısa sebep (varsayılan) |
+| `persona/samimi-arkadas.txt` | Sıcak, sohbet eder gibi, terimleri açıklar |
+| `persona/profesyonel-analist.txt` | Kurumsal, resmi rapor tonu |
+| `persona/agresif-trader.txt` | Kendinden emin, trader jargonlu |
+| `persona/temkinli-mentor.txt` | Öğretici, riski sık vurgulayan |
+| `persona/esprili-rahat.txt` | Rahat, esprili ama doğruluktan ödün vermeyen |
+| `persona/veri-bilimci.txt` | Sayı/olasılık odaklı, ölçülebilir gerekçeler |
+
+Kişilik değiştirmek için istediğin dosyanın içeriğini `persona.txt`'ye kopyala:
+
+```powershell
+copy persona\samimi-arkadas.txt persona.txt
+```
+
+Kendi kişiliğini de yazabilirsin — `persona.txt`'yi doğrudan düzenlemen yeterli. Bot yeniden başlatıldığında yeni kişilik devreye girer.
 
 ### 🔒 Güvenlik
 
@@ -127,7 +149,9 @@ Kripto Telegram Botu/
 ├─ analyzer.py       # OpenAI uyumlu LLM: şemalı analiz + serbest sohbet, persona, retry + yedek model
 ├─ formatter.py      # JSON analiz → düzenli Telegram mesajı
 ├─ backtest.py       # geçmiş noktalarda tahmin doğruluğu (/dogruluk)
-├─ config.py         # .env yükleme ve doğrulama
+├─ config.py         # .env + persona.txt yükleme ve doğrulama
+├─ persona.txt       # aktif AI kişiliği (persona/ klasöründen seçilip kopyalanır)
+├─ persona/          # hazır kişilik şablonları (kisa-net, samimi-arkadas, ...)
 ├─ test_pipeline.py  # Telegram'sız uçtan uca test
 ├─ test_backtest.py  # backtest testi
 ├─ .env.example      # yapılandırma şablonu

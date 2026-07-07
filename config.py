@@ -27,9 +27,24 @@ def _int_list(raw: str) -> list[int]:
     return [int(x) for x in raw.replace(" ", "").split(",") if x.lstrip("-").isdigit()]
 
 
+def _load_persona() -> str:
+    """persona.txt varsa onu kullanır (öncelikli); yoksa .env'deki BOT_PERSONA'ya döner.
+
+    persona/ klasöründeki hazır kişiliklerden biri persona.txt'ye kopyalanarak seçilir.
+    """
+    try:
+        with open("persona.txt", "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                return content
+    except FileNotFoundError:
+        pass
+    return _get("BOT_PERSONA")
+
+
 # Bot kimliği / kişiliği (opsiyonel) — LLM'in cevap tonunu belirler.
 BOT_NAME = _get("BOT_NAME", "Kripto Analiz Botu")
-BOT_PERSONA = _get("BOT_PERSONA")
+BOT_PERSONA = _load_persona()
 
 # Erişim kontrolü (opsiyonel) — doluysa YALNIZCA bu Telegram user id'leri botu kullanabilir.
 # Boşsa bot herkese açıktır.
