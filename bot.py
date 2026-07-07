@@ -1,6 +1,7 @@
 """Telegram kripto analiz botu — giriş noktası."""
 import asyncio
 import logging
+import re
 import time
 from collections import defaultdict, deque
 
@@ -87,8 +88,24 @@ def _looks_like_bare_symbol(text: str) -> bool:
     return bool(core) and core.isalnum() and len(core) <= 12
 
 
+def _sanitize_markdown(text: str) -> str:
+    """LLM çıktısını Telegram'ın (legacy) Markdown'ıyla uyumlu hale getirir.
+
+    '* ' liste imi, kalın için kullanılan '*kelime*' ile aynı karakteri paylaştığı için
+    tek sayıda '*'/'_' kalırsa Telegram "can't parse entities" hatası verir ve mesaj düz
+    metin olarak (yıldızlar görünür halde) gönderilir. Liste imlerini '-' yapıp eşleşmeyen
+    kalın/italik işaretlerini kaldırarak bunu önler.
+    """
+    text = re.sub(r"(?m)^(\s*)\*(\s+)", r"\1-\2", text)
+    for ch in ("*", "_"):
+        if text.count(ch) % 2 != 0:
+            text = text.replace(ch, "")
+    return text
+
+
 async def _safe_edit(status, text: str):
     """Önce Markdown ile dener; biçim hatası olursa düz metne düşer."""
+    text = _sanitize_markdown(text)
     try:
         await status.edit_text(text, parse_mode=ParseMode.MARKDOWN)
     except Exception:
@@ -306,9 +323,7 @@ async def cmd_dogruluk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         result = await asyncio.to_thread(
             backtest.run_backtest, symbol_raw, timeframe
         )
-        await status.edit_text(
-            formatter.format_backtest(result), parse_mode=ParseMode.MARKDOWN
-        )
+        await _safe_edit(status, formatter.format_backtest(result))
     except Exception as e:
         log.exception("Backtest hatası")
         await status.edit_text(f"⚠️ Doğruluk analizi başarısız: {e}")

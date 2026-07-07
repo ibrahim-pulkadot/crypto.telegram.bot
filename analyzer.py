@@ -68,7 +68,10 @@ CHAT_SYSTEM_PROMPT = (
     "- Anlaşılır Türkçe yaz; uygun yerlerde madde imleri, net seviyeler ve olasılık ver.\n"
     "- Tahmin istenirse yön, olası senaryolar, önemli destek/direnç ve geçersizlik koşulu ver.\n"
     "- Cevabın en sonuna tek satır '⚠️ Yatırım tavsiyesi değildir.' notu ekle.\n"
-    "- Telegram için sade Markdown kullan (kalın için tek *yıldız*); biçimi abartma."
+    "- Telegram için sade Markdown kullan: kalın için tek *yıldız* (ör. *Trend Yönü*), "
+    "liste maddeleri için '-' kullan; '*' KARAKTERİNİ ASLA liste imi olarak kullanma "
+    "(kalın işaretiyle karışır ve mesaj bozulur). Kalın içinde başka biçimlendirme iç içe "
+    "geçirme, biçimi abartma."
 )
 
 JSON_SCHEMA_HINT = {
