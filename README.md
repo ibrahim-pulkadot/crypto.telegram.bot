@@ -15,7 +15,8 @@ Bir coin gönder; borsadan **gerçek OHLCV verisi** çeker, teknik indikatörler
 - **Saf Python indikatörler** — `RSI`, `MACD`, `EMA`, `Bollinger`, `ATR`, `ADX`, `Stochastic` ve otomatik **destek/direnç** seviyeleri. `pandas`/`ta` **kullanılmaz**.
 - **AI yorumu** — indikatör özetini (ve varsa grafik görselini) OpenAI uyumlu bir LLM API'sine verir; yön, güven skoru, giriş bölgesi, stop-loss, hedefler ve geçersizlik koşulunu **JSON** olarak alır.
 - **Görsel + veri birlikte** — bir mum grafiği fotoğrafı gönderirsen, `vision` destekli model formasyon ve trend çizgilerini de yorumlar.
-- **Kişileştirilebilir** — `BOT_NAME` / `BOT_PERSONA` ile botun adını ve cevap tonunu `.env`'den belirle.
+- **Kişileştirilebilir** — `BOT_NAME` / `persona.txt` ile botun adını ve cevap tonunu belirle; `persona/` klasöründe hazır kişilikler var.
+- **Haber okuma** — Google News'ten sembolle ilgili güncel haber başlıklarını çeker ve AI'ın analizine ek bağlam olarak katar (teknik veriyle çelişirse teknik veri önceliklidir). `/haber ac` / `/haber kapat` ile açılıp kapanabilir.
 - **Erişim kontrolü** — `ALLOWED_USER_IDS` ayarlarsan botu **yalnızca sen** (veya izin verdiğin kişiler) kullanabilir; kendi Telegram'ında özel çalıştırmak için birebir.
 - **Doğruluk testi** — `/dogruluk` komutu, AI tahminlerini geçmiş noktalarda çalıştırıp isabet oranını ölçer.
 - **Rate-limit** — kullanıcı başına dakikalık istek sınırı (varsayılan `5`).
@@ -56,6 +57,8 @@ EXCHANGE_ID=binance                         # ccxt borsa id: bybit, okx, kucoin.
 TIMEFRAMES=1h,4h,1d                         # analiz edilecek zaman aralıkları
 CANDLE_LIMIT=200                            # her aralık için çekilecek mum sayısı
 RATE_LIMIT_PER_MIN=5                        # kullanıcı başına dakikalık istek limiti
+NEWS_ENABLED=true                           # haber okuma başlangıçta açık mı (/haber ile değişir)
+NEWS_MAX_ITEMS=5                            # analize dahil edilecek en fazla haber başlığı
 ```
 
 | Değişken | Varsayılan | Açıklama |
@@ -72,6 +75,8 @@ RATE_LIMIT_PER_MIN=5                        # kullanıcı başına dakikalık is
 | `TIMEFRAMES` | `1h,4h,1d` | Analiz zaman aralıkları (virgülle) |
 | `CANDLE_LIMIT` | `200` | Aralık başına mum sayısı |
 | `RATE_LIMIT_PER_MIN` | `5` | Kullanıcı başına dakikalık limit |
+| `NEWS_ENABLED` | `true` | Bot açılışta haber okuma açık mı (çalışırken `/haber ac`\|`kapat` ile değişir, kalıcı değildir) |
+| `NEWS_MAX_ITEMS` | `5` | Analize dahil edilecek en fazla haber başlığı |
 
 Model başlangıçta `config.validate()` ile doğrulanır; token veya API anahtarı eksikse bot açılmaz.
 
@@ -97,6 +102,15 @@ copy persona\samimi-arkadas.txt persona.txt
 
 Kendi kişiliğini de yazabilirsin — `persona.txt`'yi doğrudan düzenlemen yeterli. Bot yeniden başlatıldığında yeni kişilik devreye girer.
 
+### 📰 Haber okuma
+
+Bot, analiz ettiği sembolle ilgili güncel haber başlıklarını Google News'ten çeker (`news.py`, API anahtarı gerekmez) ve bunları AI'ın analizine ek bağlam olarak verir. Haberler teknik verilerle çelişirse teknik veri her zaman önceliklidir; haberin analize etkisi varsa sonuç kartında **📰 Haber etkisi** satırında görünür.
+
+- `NEWS_ENABLED` (`.env`) — bot açılışta haber okumanın açık mı kapalı mı başlayacağını belirler.
+- `/haber` — mevcut durumu gösterir.
+- `/haber ac` / `/haber kapat` — çalışırken açar/kapatır (kalıcı değildir, bot yeniden başlayınca `.env`'deki değere döner).
+- `/dogruluk` backtest'i haber kullanmaz — geçmiş bir noktayı test ederken bugünün haberini vermek gerçekçi olmaz (veri sızıntısı).
+
 ### 🔒 Güvenlik
 
 - `.env` dosyasını **asla** paylaşma veya commit etme; gerçek `TELEGRAM_BOT_TOKEN` ve `LLM_API_KEY` gizli kalmalı (`.gitignore` içinde olduğundan emin ol).
@@ -121,6 +135,7 @@ Bot açıldıktan sonra Telegram'da:
 - `/analiz ETH` — klasik kart
 - Bir **grafik görseli** gönder, caption'a coin adını ya da isteğini yaz
 - `/dogruluk BTC 4h` — AI tahminlerinin geçmişteki isabet oranını ölç
+- `/haber` — haber okuma açık mı kapalı mı göster; `/haber ac` / `/haber kapat` ile değiştir
 
 Sembol serbest biçim kabul eder: `btc`, `BTCUSDT`, `btc/usdt` → hepsi `BTC/USDT`'ye normalleştirilir (quote verilmezse `USDT` varsayılır). Sohbet modunda süre ifadeleri (`3 aylık`, `son 1 hafta`, `günlük`) uygun mum aralığı ve sayısına otomatik çevrilir.
 
@@ -149,6 +164,7 @@ Kripto Telegram Botu/
 ├─ analyzer.py       # OpenAI uyumlu LLM: şemalı analiz + serbest sohbet, persona, retry + yedek model
 ├─ formatter.py      # JSON analiz → düzenli Telegram mesajı
 ├─ backtest.py       # geçmiş noktalarda tahmin doğruluğu (/dogruluk)
+├─ news.py           # Google News RSS'ten haber başlığı çekme (/haber ile açılıp kapanır)
 ├─ config.py         # .env + persona.txt yükleme ve doğrulama
 ├─ persona.txt       # aktif AI kişiliği (persona/ klasöründen seçilip kopyalanır)
 ├─ persona/          # hazır kişilik şablonları (kisa-net, samimi-arkadas, ...)

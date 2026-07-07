@@ -42,6 +42,10 @@ SYSTEM_PROMPT = (
     "- Kullanıcının özel bir isteği varsa onu da dikkate al.\n"
     "- Belirsizlik/çelişki durumunda dürüstçe 'nötr' de ve confidence'ı düşük tut — yanlış "
     "kesinlik gösterme.\n"
+    "- Güncel haber başlıkları verilirse bunları ek bağlam olarak değerlendir; ancak "
+    "teknik veriyle çelişen spekülatif/duygusal başlıklara aşırı ağırlık verme — teknik "
+    "veri her zaman önceliklidir. Haberlerin analizi nasıl etkilediğini 'news_impact' "
+    "alanında tek cümleyle özetle (haber verilmediyse alanı boş bırak).\n"
     "- Bu bir yatırım tavsiyesi DEĞİLDİR; çıktı olasılıksaldır.\n"
     "- Yanıtı YALNIZCA aşağıdaki JSON şemasında ver, ekstra metin yazma."
 )
@@ -56,6 +60,8 @@ CHAT_SYSTEM_PROMPT = (
     "(5) hacmin (volume_last vs volume_avg20) hareketi destekleyip desteklemediği. Bu "
     "kategoriler ne kadar aynı yönü gösteriyorsa o kadar kararlı konuş; çelişkiliyse bunu "
     "açıkça söyle ve aşırı kesin ifadelerden kaçın.\n"
+    "Güncel haber başlıkları verilirse ek bağlam olarak değerlendir; teknik veriyle çelişen "
+    "spekülatif/duygusal başlıklara aşırı ağırlık verme, teknik veri her zaman önceliklidir.\n"
     "Kurallar:\n"
     "- Kullanıcının tam olarak istediği şeyi yap; gereksiz genel geçer laf etme.\n"
     "- Sadece verilen gerçek verilere dayan, fiyat/veri UYDURMA.\n"
@@ -76,6 +82,7 @@ JSON_SCHEMA_HINT = {
     "take_profit": ["hedef seviyeler"],
     "invalidation": "senaryonun geçersiz olacağı koşul (kısa metin)",
     "risk_note": "kısa risk uyarısı (Türkçe)",
+    "news_impact": "haberlerin analize etkisi, tek cümle (haber yoksa boş bırak)",
 }
 
 
@@ -138,12 +145,18 @@ def _complete(messages: list, response_format=None, temperature: float = 0.4,
 
 
 def _build_user_content(indicator_summary: dict, image_bytes: bytes | None,
-                        user_request: str | None = None) -> list:
+                        user_request: str | None = None,
+                        news_text: str | None = None) -> list:
     text = (
         f"Sembol: {indicator_summary.get('symbol')}\n\n"
         f"Teknik indikatör özeti (zaman aralığı bazında):\n"
         f"{json.dumps(indicator_summary.get('timeframes', {}), ensure_ascii=False, indent=2)}\n\n"
     )
+    if news_text:
+        text += (
+            f"Güncel haber başlıkları (doğruluğu garanti edilmez, ek bağlam olarak kullan):\n"
+            f"{news_text}\n\n"
+        )
     if user_request:
         text += f"Kullanıcının özel isteği: {user_request}\n\n"
     text += (
@@ -157,26 +170,33 @@ def _build_user_content(indicator_summary: dict, image_bytes: bytes | None,
 
 
 def analyze(indicator_summary: dict, image_bytes: bytes | None = None,
-            user_request: str | None = None) -> dict:
+            user_request: str | None = None, news_text: str | None = None) -> dict:
     """Şemalı (JSON) teknik analiz döndürür."""
     messages = [
         {"role": "system", "content": _system(SYSTEM_PROMPT)},
-        {"role": "user", "content": _build_user_content(indicator_summary, image_bytes, user_request)},
+        {"role": "user", "content": _build_user_content(
+            indicator_summary, image_bytes, user_request, news_text
+        )},
     ]
     raw = _complete(messages, response_format={"type": "json_object"})
     return _parse_json(raw)
 
 
 def chat_analyze(user_request: str, indicator_summary: dict,
-                 image_bytes: bytes | None = None) -> str:
+                 image_bytes: bytes | None = None, news_text: str | None = None) -> str:
     """Kullanıcının serbest metin isteğine gerçek veriye dayalı serbest yanıt üretir."""
     text = (
         f"Kullanıcının isteği: {user_request}\n\n"
         f"Sembol: {indicator_summary.get('symbol')}\n"
         f"Gerçek teknik indikatör verileri (zaman aralığı bazında):\n"
         f"{json.dumps(indicator_summary.get('timeframes', {}), ensure_ascii=False, indent=2)}\n\n"
-        "Bu gerçek verilere dayanarak kullanıcının isteğini eksiksiz yerine getir."
     )
+    if news_text:
+        text += (
+            f"Güncel haber başlıkları (doğruluğu garanti edilmez, ek bağlam olarak kullan):\n"
+            f"{news_text}\n\n"
+        )
+    text += "Bu gerçek verilere dayanarak kullanıcının isteğini eksiksiz yerine getir."
     content = [{"type": "text", "text": text}]
     if image_bytes:
         content.append(_image_part(image_bytes))

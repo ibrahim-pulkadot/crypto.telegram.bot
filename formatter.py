@@ -45,6 +45,8 @@ def format_analysis(symbol: str, primary_tf: str, result: dict) -> str:
         lines.append(f"🏁 *Hedefler:* {_fmt_levels(result['take_profit'])}")
     if result.get("invalidation"):
         lines.append(f"❌ *Geçersizlik:* {result['invalidation']}")
+    if result.get("news_impact"):
+        lines.append(f"📰 *Haber etkisi:* {result['news_impact']}")
 
     lines.append("")
     risk = result.get("risk_note") or (

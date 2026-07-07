@@ -22,6 +22,11 @@ TIMEFRAMES = [t.strip() for t in _get("TIMEFRAMES", "1h,4h,1d").split(",") if t.
 CANDLE_LIMIT = int(_get("CANDLE_LIMIT", "200"))
 RATE_LIMIT_PER_MIN = int(_get("RATE_LIMIT_PER_MIN", "5"))
 
+# Haber okuma (opsiyonel) — açık/kapalı .env'den varsayılanı belirler, /haber komutuyla
+# çalışırken de değiştirilebilir.
+NEWS_ENABLED_DEFAULT = _get("NEWS_ENABLED", "true").lower() in ("1", "true", "evet", "açık", "acik", "yes")
+NEWS_MAX_ITEMS = int(_get("NEWS_MAX_ITEMS", "5"))
+
 
 def _int_list(raw: str) -> list[int]:
     return [int(x) for x in raw.replace(" ", "").split(",") if x.lstrip("-").isdigit()]

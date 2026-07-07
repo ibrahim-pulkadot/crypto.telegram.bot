@@ -21,6 +21,7 @@ import analyzer
 import formatter
 import backtest
 import intent
+import news
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -30,6 +31,21 @@ log = logging.getLogger("cryptobot")
 
 # Kullanıcı başına istek zaman damgaları (basit rate-limit)
 _requests: dict[int, deque] = defaultdict(deque)
+
+# Haber okuma açık/kapalı — çalışırken /haber komutuyla değiştirilebilir (global, tüm kullanıcılar için).
+_news_enabled = config.NEWS_ENABLED_DEFAULT
+
+
+def _fetch_news_text(symbol: str) -> str | None:
+    """Haber okuma açıksa sembolle ilgili başlıkları getirir; kapalıysa veya hata olursa None döner."""
+    if not _news_enabled:
+        return None
+    try:
+        items = news.fetch_news(symbol, limit=config.NEWS_MAX_ITEMS)
+    except Exception:
+        log.exception("Haber çekilemedi")
+        return None
+    return news.format_news_for_prompt(items) or None
 
 
 def _rate_limited(user_id: int) -> bool:
@@ -93,6 +109,7 @@ WELCOME = (
     "• `/analiz ETH` — klasik kart\n"
     "• Bir grafik görseli gönder (caption'a coin adını/isteğini yaz)\n"
     "• `/dogruluk BTC 4h` — AI tahminlerinin geçmişteki isabet oranını ölç\n"
+    "• `/haber` — haber okuma açık mı kapalı mı göster; `/haber ac` / `/haber kapat` ile değiştir\n"
     "• `yardım` yaz veya `/yardim` — bu listeyi tekrar gör\n\n"
     "⚠️ _Yatırım tavsiyesi değildir._"
 )
@@ -157,7 +174,8 @@ async def _run_analysis_threadsafe(symbol_raw: str, image_bytes: bytes | None):
                 f"'{symbol}' için veri alınamadı. Sembolü kontrol et (örn. BTC/USDT)."
             )
         summary = indicators.multi_timeframe_summary(symbol, ohlcv_by_tf)
-        result = analyzer.analyze(summary, image_bytes=image_bytes)
+        news_text = _fetch_news_text(symbol)
+        result = analyzer.analyze(summary, image_bytes=image_bytes, news_text=news_text)
         return formatter.format_analysis(symbol, config.PRIMARY_TIMEFRAME, result)
 
     msg = await asyncio.to_thread(work)
@@ -209,7 +227,8 @@ def _run_chat(text: str, image_bytes: bytes | None) -> str:
     summary = indicators.multi_timeframe_summary(symbol, {parsed["timeframe"]: ohlcv})
     if not summary["timeframes"]:
         raise ValueError(f"'{symbol}' için yeterli veri bulunamadı. Sembolü kontrol et.")
-    return analyzer.chat_analyze(parsed["request"], summary, image_bytes=image_bytes)
+    news_text = _fetch_news_text(symbol)
+    return analyzer.chat_analyze(parsed["request"], summary, image_bytes=image_bytes, news_text=news_text)
 
 
 async def cmd_analiz(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -219,6 +238,40 @@ async def cmd_analiz(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     symbol_raw = args[0] if args else ""
     # İkinci argüman zaman aralığı ise geçici override
     await _handle(update, ctx, symbol_raw, None)
+
+
+_HABER_ON = {"ac", "aç", "on", "acik", "açık", "evet"}
+_HABER_OFF = {"kapat", "off", "kapali", "kapalı", "hayir", "hayır"}
+
+
+async def cmd_haber(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if await _guard(update):
+        return
+    global _news_enabled
+    args = ctx.args or []
+    if not args:
+        durum = "açık ✅" if _news_enabled else "kapalı ❌"
+        await update.message.reply_text(
+            f"📰 Haber okuma şu an: *{durum}*\n"
+            "Açmak için `/haber ac`, kapatmak için `/haber kapat` yaz.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+    arg = args[0].strip().lower()
+    if arg in _HABER_ON:
+        _news_enabled = True
+        await update.message.reply_text(
+            "📰 Haber okuma açıldı — analizlerde güncel haber başlıkları da dikkate alınacak."
+        )
+    elif arg in _HABER_OFF:
+        _news_enabled = False
+        await update.message.reply_text(
+            "📰 Haber okuma kapatıldı — analizler yalnızca teknik verilere dayanacak."
+        )
+    else:
+        await update.message.reply_text(
+            "Kullanım: `/haber ac` veya `/haber kapat`", parse_mode=ParseMode.MARKDOWN
+        )
 
 
 async def cmd_dogruluk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -304,6 +357,7 @@ def main():
     app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CommandHandler("analiz", cmd_analiz))
     app.add_handler(CommandHandler("dogruluk", cmd_dogruluk))
+    app.add_handler(CommandHandler("haber", cmd_haber))
     app.add_handler(CommandHandler("yardim", cmd_start))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
